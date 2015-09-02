@@ -1,0 +1,90 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:tx="http://www.springframework.org/schema/tx"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans
+						http://www.springframework.org/schema/beans/spring-beans-3.2.xsd
+						http://www.springframework.org/schema/tx
+						http://www.springframework.org/schema/tx/spring-tx-3.2.xsd
+						http://www.springframework.org/schema/context
+						http://www.springframework.org/schema/context/spring-context-3.2.xsd">
+	<context:component-scan base-package="com.jadyer.server"/>
+	
+	<bean class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+		<property name="systemPropertiesModeName" value="SYSTEM_PROPERTIES_MODE_OVERRIDE"/>
+		<property name="ignoreResourceNotFound" value="false"/>
+		<property name="locations">
+			<list>
+				<value>classpath:config.properties</value>
+			</list>
+		</property>
+	</bean>
+	
+	<bean id="dataSource" class="org.logicalcobwebs.proxool.ProxoolDataSource">
+		<property name="user" value="${sys.database.username}"/>
+		<property name="password" value="${sys.database.password}"/>
+		<property name="driverUrl" value="${sys.database.url}"/>
+    	<property name="driver" value="oracle.jdbc.OracleDriver"/>
+		<property name="simultaneousBuildThrottle" value="10"/>
+		<property name="maximumConnectionCount" value="100"/>
+		<property name="minimumConnectionCount" value="10"/>
+		<property name="maximumActiveTime" value="1800000"/>
+		<property name="prototypeCount" value="0"/>
+		<property name="testBeforeUse" value="true"/>
+		<property name="houseKeepingTestSql" value="select sysdate from DUAL"/>
+    </bean>
+    <bean id="txManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="dataSource"/>
+	</bean>
+	<tx:annotation-driven transaction-manager="txManager"/>
+	
+	<!-- 构造Server端 -->
+	<bean id="jadyerServer" class="com.jadyer.server.core.MinaStartup" init-method="bind">
+		<property name="reuseAddress" value="true"/>
+		<property name="writeTimeout" value="${sys.timeout.tcp.write}"/>
+		<property name="bothIdleTime" value="${sys.timeout.tcp.bothIdle}"/>
+		<property name="filterChainBuilder" ref="ioFilterChainBuilder"/>
+		<property name="handler" ref="jadyerServerHandler"/>
+		<property name="socketAddresses">
+			<list>
+				<bean class="java.net.InetSocketAddress">
+					<constructor-arg index="0" value="${server.port.tcp}"/>
+				</bean>
+				<bean class="java.net.InetSocketAddress">
+					<constructor-arg index="0" value="${server.port.http}"/>
+				</bean>
+			</list>
+		</property>
+	</bean>
+	<!-- 构造过滤器链 -->
+	<!-- 这里有个鱼和熊掌不可兼得的情景,注意:无论如何executor都要定义在NioSocketConnector.setHandler()的前面 -->
+	<!-- 若将codec定义在executor的前面,则codec由NioProcessor-1线程处理,IoHandler由pool-1-thread-1线程处理 -->
+	<!-- 若将codec定义在executor的后面,则codec和IoHandler都由pool-1-thread-1线程处理 -->
+	<bean id="ioFilterChainBuilder" class="org.apache.mina.core.filterchain.DefaultIoFilterChainBuilder">
+		<property name="filters">
+			<map>
+				<entry key="codec">
+					<bean class="org.apache.mina.filter.codec.ProtocolCodecFilter">
+						<constructor-arg>
+							<bean class="com.jadyer.server.core.ServerProtocolCodecFactory"/>
+						</constructor-arg>
+					</bean>
+				</entry>
+				<entry key="executor">
+					<bean class="org.apache.mina.filter.executor.ExecutorFilter"/>
+				</entry>
+			</map>
+		</property>
+	</bean>
+	<!-- 构造业务处理类 -->
+	<bean id="jadyerServerHandler" class="com.jadyer.server.core.ServerHandler">
+		<property name="busiProcessMap">
+			<map key-type="java.lang.String" value-type="com.jadyer.server.core.GenericAction">
+				<entry key="10005" value-ref="orderResultNotifyAction"/>
+				<entry key="/notify_boc" value-ref="netBankResultNotifyBOCAction"/>
+				<entry key="/notify_yeepay" value-ref="netBankResultNotifyYEEPAYAction"/>
+			</map>
+		</property>
+	</bean>
+</beans>
